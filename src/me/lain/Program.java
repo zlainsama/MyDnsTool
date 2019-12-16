@@ -26,6 +26,10 @@ public class Program
 
     }
 
+    static String AdServers = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=1&startdate%5Bday%5D=&startdate%5Bmonth%5D=&startdate%5Byear%5D=";
+    static String MalwareDomains = "https://mirror1.malwaredomains.com/files/BOOT";
+    static String LocalForwards = "https://github.com/felixonmars/dnsmasq-china-list/raw/master/accelerated-domains.china.conf";
+
     public static void main(String[] args)
     {
         List<ForkJoinTask<?>> tasks = new ArrayList<>();
@@ -47,7 +51,7 @@ public class Program
 
     static void processAdServers()
     {
-        resource("http://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=1&startdate%5Bday%5D=&startdate%5Bmonth%5D=&startdate%5Byear%5D=")
+        resource(AdServers)
                 .ifPresent(remote -> read(remote, Paths.get("AdServers"), 3)
                         .ifPresent(local -> {
                             try
@@ -78,7 +82,7 @@ public class Program
 
     static void processLocalForwards()
     {
-        resource("https://github.com/felixonmars/dnsmasq-china-list/raw/master/accelerated-domains.china.conf")
+        resource(LocalForwards)
                 .ifPresent(remote -> read(remote, Paths.get("LocalForwards"), 3)
                         .ifPresent(local -> {
                             try
@@ -110,7 +114,7 @@ public class Program
 
     static void processMalwareDomains()
     {
-        resource("http://mirror1.malwaredomains.com/files/BOOT")
+        resource(MalwareDomains)
                 .ifPresent(remote -> read(remote, Paths.get("MalwareDomains"), 3)
                         .ifPresent(local -> {
                             try
