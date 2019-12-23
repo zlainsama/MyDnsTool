@@ -5,6 +5,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -15,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Program
 {
@@ -26,9 +28,11 @@ public class Program
 
     }
 
-    static String AdServers = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=1&startdate%5Bday%5D=&startdate%5Bmonth%5D=&startdate%5Byear%5D=";
-    static String MalwareDomains = "https://mirror1.malwaredomains.com/files/BOOT";
-    static String LocalForwards = "https://github.com/felixonmars/dnsmasq-china-list/raw/master/accelerated-domains.china.conf";
+    static final int MaxRetries = 5;
+    static final String AdServers = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=1&startdate%5Bday%5D=&startdate%5Bmonth%5D=&startdate%5Byear%5D=";
+    static final String MalwareDomains = "https://mirror1.malwaredomains.com/files/BOOT";
+    static final String LocalForwards = "https://github.com/felixonmars/dnsmasq-china-list/raw/master/accelerated-domains.china.conf";
+    static final AtomicInteger CompletedTasks = new AtomicInteger();
 
     public static void main(String[] args)
     {
@@ -37,6 +41,8 @@ public class Program
         tasks.add(ForkJoinTask.adapt(Program::processMalwareDomains));
         tasks.add(ForkJoinTask.adapt(Program::processLocalForwards));
         ForkJoinTask.invokeAll(tasks);
+        if (CompletedTasks.get() != 3)
+            System.exit(1);
     }
 
     static void process(Path in, Path out, Processor processor) throws IOException
@@ -52,7 +58,7 @@ public class Program
     static void processAdServers()
     {
         resource(AdServers)
-                .ifPresent(remote -> read(remote, Paths.get("AdServers"), 3)
+                .ifPresent(remote -> read(remote, Paths.get("AdServers"), MaxRetries)
                         .ifPresent(local -> {
                             try
                             {
@@ -72,6 +78,7 @@ public class Program
                                         w.newLine();
                                     }
                                 });
+                                CompletedTasks.getAndIncrement();
                             }
                             catch (IOException e)
                             {
@@ -83,7 +90,7 @@ public class Program
     static void processLocalForwards()
     {
         resource(LocalForwards)
-                .ifPresent(remote -> read(remote, Paths.get("LocalForwards"), 3)
+                .ifPresent(remote -> read(remote, Paths.get("LocalForwards"), MaxRetries)
                         .ifPresent(local -> {
                             try
                             {
@@ -104,6 +111,7 @@ public class Program
                                         w.newLine();
                                     }
                                 });
+                                CompletedTasks.getAndIncrement();
                             }
                             catch (IOException e)
                             {
@@ -115,7 +123,7 @@ public class Program
     static void processMalwareDomains()
     {
         resource(MalwareDomains)
-                .ifPresent(remote -> read(remote, Paths.get("MalwareDomains"), 3)
+                .ifPresent(remote -> read(remote, Paths.get("MalwareDomains"), MaxRetries)
                         .ifPresent(local -> {
                             try
                             {
@@ -136,6 +144,7 @@ public class Program
                                         w.newLine();
                                     }
                                 });
+                                CompletedTasks.getAndIncrement();
                             }
                             catch (IOException e)
                             {
@@ -152,17 +161,26 @@ public class Program
             System.out.println(String.format("> Downloading %s (%d/%d)", resource, tries, maxTries));
             try (FileChannel channel = FileChannel.open(local, StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING))
             {
-                channel.transferFrom(Channels.newChannel(resource.openStream()), 0L, Long.MAX_VALUE);
+                URLConnection conn = resource.openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(30000);
+                conn.setUseCaches(false);
+                conn.setDoInput(true);
+                conn.setDoOutput(false);
+                channel.transferFrom(Channels.newChannel(conn.getInputStream()), 0L, Long.MAX_VALUE);
                 return Optional.of(local);
             }
             catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+            finally
             {
                 if (Thread.interrupted())
                 {
                     Thread.currentThread().interrupt();
                     break;
                 }
-                e.printStackTrace();
             }
         }
         return Optional.empty();
