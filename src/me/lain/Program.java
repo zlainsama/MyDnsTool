@@ -22,13 +22,13 @@ public class Program {
 
     static final int TotalTasks = 2;
     static final int MaxRetries = 5;
-    static final String AdServers = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=1&startdate%5Bday%5D=&startdate%5Bmonth%5D=&startdate%5Byear%5D=";
+    static final String StevenBlack = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts";
     static final String LocalForwards = "https://github.com/felixonmars/dnsmasq-china-list/raw/master/accelerated-domains.china.conf";
     static final AtomicInteger CompletedTasks = new AtomicInteger();
 
     public static void main(String[] args) {
         List<ForkJoinTask<?>> tasks = new ArrayList<>();
-        tasks.add(ForkJoinTask.adapt(Program::processAdServers));
+        tasks.add(ForkJoinTask.adapt(Program::processStevenBlack));
         tasks.add(ForkJoinTask.adapt(Program::processLocalForwards));
         ForkJoinTask.invokeAll(tasks);
         if (CompletedTasks.get() != TotalTasks)
@@ -36,72 +36,78 @@ public class Program {
     }
 
     static void process(Path in, Path out, Processor processor) throws IOException {
-        System.out.println(String.format("> Processing %s", in));
+        System.out.printf("> Processing %s%n", in);
         try (BufferedReader rIn = Files.newBufferedReader(in); BufferedWriter wOut = Files.newBufferedWriter(out)) {
             processor.accept(rIn, wOut);
         }
-        System.out.println(String.format("> Completed %s", out));
+        System.out.printf("> Completed %s%n", out);
     }
 
-    static void processAdServers() {
-        resource(AdServers)
-                .ifPresent(remote -> read(remote, Paths.get("AdServers"), MaxRetries)
-                        .ifPresent(local -> {
-                            try {
-                                process(local, Paths.get("AdServers_Processed"), (r, w) -> {
-                                    String l = null;
-                                    while ((l = r.readLine()) != null) {
-                                        if (l.isEmpty())
-                                            continue;
-                                        w.write("local-zone: ");
-                                        w.write(l);
-                                        w.write(" redirect");
-                                        w.newLine();
-                                        w.write("local-data: \"");
-                                        w.write(l);
-                                        w.write(" A 0.0.0.0\"");
-                                        w.newLine();
-                                    }
-                                });
-                                CompletedTasks.getAndIncrement();
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
-                        }));
+    static void processStevenBlack() {
+        resource(StevenBlack).flatMap(remote -> read(remote, Paths.get("StevenBlack"))).ifPresent(local -> {
+            try {
+                process(local, Paths.get("StevenBlack_Processed"), (r, w) -> {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (line.isEmpty() || line.startsWith("#"))
+                            continue;
+                        int indexOfSpace = line.indexOf(" ");
+                        if (indexOfSpace == -1)
+                            continue;
+                        String ip = line.substring(0, indexOfSpace).trim();
+                        String host = line.substring(indexOfSpace + 1).trim();
+                        int indexOfComment = host.indexOf("#");
+                        if (indexOfComment != -1)
+                            host = host.substring(0, indexOfComment).trim();
+                        if (!"0.0.0.0".equals(ip) || "0.0.0.0".equals(host))
+                            continue;
+                        w.write("local-zone: ");
+                        w.write(host);
+                        w.write(" redirect");
+                        w.newLine();
+                        w.write("local-data: \"");
+                        w.write(host);
+                        w.write(" A 0.0.0.0\"");
+                        w.newLine();
+                    }
+                });
+                CompletedTasks.getAndIncrement();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
     }
 
     static void processLocalForwards() {
-        resource(LocalForwards)
-                .ifPresent(remote -> read(remote, Paths.get("LocalForwards"), MaxRetries)
-                        .ifPresent(local -> {
-                            try {
-                                process(local, Paths.get("LocalForwards_Processed"), (r, w) -> {
-                                    String l = null;
-                                    while ((l = r.readLine()) != null) {
-                                        if (l.isEmpty() || l.startsWith("#"))
-                                            continue;
-                                        String[] al = l.split("/", 3);
-                                        w.write("forward-zone:");
-                                        w.newLine();
-                                        w.write("  name: \"");
-                                        w.write(al[1]);
-                                        w.write("\"");
-                                        w.newLine();
-                                        w.write("  forward-addr: 114.114.114.114");
-                                        w.newLine();
-                                    }
-                                });
-                                CompletedTasks.getAndIncrement();
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
-                        }));
+        resource(LocalForwards).flatMap(remote -> read(remote, Paths.get("LocalForwards"))).ifPresent(local -> {
+            try {
+                process(local, Paths.get("LocalForwards_Processed"), (r, w) -> {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (line.isEmpty() || line.startsWith("#"))
+                            continue;
+                        String[] al = line.split("/", 3);
+                        w.write("forward-zone:");
+                        w.newLine();
+                        w.write("  name: \"");
+                        w.write(al[1]);
+                        w.write("\"");
+                        w.newLine();
+                        w.write("  forward-addr: 114.114.114.114");
+                        w.newLine();
+                    }
+                });
+                CompletedTasks.getAndIncrement();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
     }
 
-    static Optional<Path> read(URL resource, Path local, int maxTries) {
+    static Optional<Path> read(URL resource, Path local) {
         int tries = 0;
-        while (tries++ < maxTries) {
-            System.out.println(String.format("> Downloading %s (%d/%d)", resource, tries, maxTries));
+        while (tries++ < MaxRetries) {
+            System.out.printf("> Downloading %s (%d/%d)%n", resource, tries, MaxRetries);
             try (FileChannel channel = FileChannel.open(local, StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
                 URLConnection conn = resource.openConnection();
                 conn.setConnectTimeout(10000);
@@ -113,11 +119,6 @@ public class Program {
                 return Optional.of(local);
             } catch (IOException e) {
                 e.printStackTrace();
-            } finally {
-                if (Thread.interrupted()) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
             }
         }
         return Optional.empty();
